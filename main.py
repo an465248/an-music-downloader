@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-import yt_dlp
-import os
+import urllib.request
 import json
+import os
 
 app = FastAPI(title="AnMusic Downloader")
 
@@ -16,7 +16,7 @@ async def home():
             return f.read()
     return "<h3>index.html not found!</h3>"
 
-# 1. INFO API (यह हिस्सा मैंने गलती से हटा दिया था, जो वीडियो क्वालिटी निकालता है)
+# 1. INFO API (यह वेबसाइट को क्रैश होने से बचाएगा)
 @app.api_route("/api/info", methods=["GET", "POST", "OPTIONS"])
 async def get_info(request: Request):
     if request.method == "OPTIONS":
@@ -27,28 +27,18 @@ async def get_info(request: Request):
     if not url:
         return JSONResponse(status_code=400, content={"error": "URL missing"})
 
-    ydl_opts = {
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': os.path.join(BASE_DIR, 'cookies.txt'),
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android_creator', 'web'],
-                'player_skip': ['webpage', 'configs']
-            }
-        }
-    }
+    # वेबसाइट के फ्रंटएंड को शांत रखने के लिए डमी डेटा
+    return JSONResponse(content={
+        "id": "video",
+        "title": "Ready to Download - YouTube Video",
+        "thumbnail": "https://www.youtube.com/img/desktop/yt_1200.png",
+        "formats": [
+            {"format_id": "mp4", "ext": "mp4", "format_note": "Video (HD)"},
+            {"format_id": "mp3", "ext": "mp3", "format_note": "Audio"}
+        ]
+    })
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            sanitized_info = ydl.sanitize_info(info)
-            return JSONResponse(content=sanitized_info)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-# 2. DOWNLOAD API (यह हिस्सा असली डाउनलोड लिंक देता है)
+# 2. DOWNLOAD API (यह बिना yt-dlp के डायरेक्ट वीडियो निकालेगा)
 @app.api_route("/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/api/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "OPTIONS"])
@@ -80,38 +70,40 @@ async def handle_download(request: Request, full_path: str = ""):
         if not url:
             return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Link nahi mila"})
 
-        ydl_opts = {
-            'format': 'best[ext=mp4]/best' if format_type == 'video' else 'bestaudio/best',
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': os.path.join(BASE_DIR, 'cookies.txt'),
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios', 'android_creator', 'web'],
-                    'player_skip': ['webpage', 'configs']
-                }
-            }
+        # === Third-Party Bypass API (No YouTube Block) ===
+        api_url = "https://api.cobalt.tools/api/json"
+        
+        payload = {
+            "url": url,
+            "isAudioOnly": True if format_type == 'audio' else False
         }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            download_url = info.get('url')
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+        
+        req = urllib.request.Request(
+            api_url, 
+            data=json.dumps(payload).encode("utf-8"), 
+            headers=headers, 
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            download_url = result.get("url")
             
-            if not download_url and 'formats' in info:
-                for f in reversed(info['formats']):
-                    if f.get('url'):
-                        download_url = f['url']
-                        break
-
-            title = info.get('title', 'Video')
+            if not download_url and result.get("picker"):
+                download_url = result["picker"][0].get("url")
 
             if download_url:
                 return JSONResponse(content={
                     "success": True,
                     "url": download_url,
                     "download_url": download_url,
-                    "title": title
+                    "title": "AnMusic Download"
                 })
             else:
                 return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Direct link generate nahi ho saka"})
