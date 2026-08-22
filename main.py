@@ -1,7 +1,5 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 import yt_dlp
 import os
 
@@ -11,12 +9,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Templates setup
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
-
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def home():
+    # Yeh code aapke templates folder se index.html ko seedhe padh lega bina kisi Jinja2 error ke
+    html_path = os.path.join(BASE_DIR, "templates", "index.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h3>index.html not found in templates folder!</h3>"
 
 @app.post("/download")
 async def download_file(url: str = Form(...), format_type: str = Form("video")):
