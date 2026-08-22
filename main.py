@@ -108,7 +108,15 @@ def _download_sync(url: str, ydl_opts: dict):
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    from fastapi.responses import HTMLResponse
+import os
+
+@app.get("/", response_class=HTMLResponse)
+async def main_page(request: Request):
+    html_path = os.path.join(BASE_DIR, "templates", "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
 
 
 @app.post("/api/download")
