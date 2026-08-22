@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 import urllib.request
+import urllib.parse
 import json
 import os
 
@@ -21,7 +22,7 @@ async def get_info(request: Request):
     if request.method == "OPTIONS": return JSONResponse(content={"status": "ok"})
     return JSONResponse(content={
         "id": "video",
-        "title": "AnMusic Download Ready",
+        "title": "Ready to Download!",
         "thumbnail": "https://www.youtube.com/img/desktop/yt_1200.png",
         "formats": [
             {"format_id": "mp4", "ext": "mp4", "format_note": "Video"},
@@ -41,55 +42,69 @@ async def handle_download(request: Request, full_path: str = ""):
         
         body = await request.body()
         if body:
-            data = json.loads(body)
-            url = data.get("url") or data.get("link")
-            format_type = data.get("format_type", "video")
+            try:
+                data = json.loads(body)
+                url = data.get("url") or data.get("link")
+                format_type = data.get("format_type", "video")
+            except: pass
         
         if not url:
             url = request.query_params.get("url") or request.query_params.get("link")
 
-        # === X-RAY LOGS START ===
-        print(f"==> DOWNLOADING: {url} | FORMAT: {format_type}")
+        if not url:
+            return JSONResponse(status_code=400, content={"error": True, "message": "Link nahi mila"})
 
-        cobalt_instances = [
-            "https://co.wuk.sh/api/json",
-            "https://api.cobalt.tools/api/json",
-            "https://cobalt.owo.vc/api/json"
-        ]
-        
-        payload = json.dumps({
-            "url": url,
-            "isAudioOnly": True if format_type == 'audio' else False
-        }).encode("utf-8")
-        
-        for instance in cobalt_instances:
-            print(f"==> TRYING SERVER: {instance}")
+        download_url = None
+
+        # तरीका 1: Cobalt API (अब एकदम सही Headers के साथ)
+        try:
+            cobalt_url = "https://api.cobalt.tools/api/json"
+            payload = json.dumps({
+                "url": url,
+                "isAudioOnly": True if format_type == 'audio' else False
+            }).encode("utf-8")
+            
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": "https://cobalt.tools",
+                "Referer": "https://cobalt.tools/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            }
+            
+            req = urllib.request.Request(cobalt_url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10) as response:
+                res = json.loads(response.read().decode("utf-8"))
+                download_url = res.get("url") or (res.get("picker")[0].get("url") if res.get("picker") else None)
+        except Exception as e:
+            pass # अगर Cobalt फेल हुआ, तो तरीका 2 इस्तेमाल होगा
+
+        # तरीका 2: Ryzen API (बिना किसी रुकावट वाला बैकअप)
+        if not download_url:
             try:
-                req = urllib.request.Request(
-                    instance,
-                    data=payload,
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                    },
-                    method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    res = json.loads(response.read().decode("utf-8"))
-                    d_url = res.get("url") or (res.get("picker")[0].get("url") if res.get("picker") else None)
-                    
-                    if d_url:
-                        print(f"==> SUCCESS WITH {instance} 🎉")
-                        return JSONResponse(content={"success": True, "url": d_url, "download_url": d_url})
-            except Exception as ex:
-                print(f"==> SERVER FAILED ({instance}): {str(ex)}")
-                continue
-        
-        print("==> 🚨 ALL SERVERS BLOCKED RENDER IP!")
-        return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "All servers blocked."})
+                encoded_url = urllib.parse.quote(url)
+                if format_type == 'audio':
+                    alt_url = f"https://api.siputzx.my.id/api/d/ytmp3?url={encoded_url}"
+                else:
+                    alt_url = f"https://api.siputzx.my.id/api/d/ytmp4?url={encoded_url}"
+                
+                req2 = urllib.request.Request(alt_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req2, timeout=10) as response2:
+                    res2 = json.loads(response2.read().decode("utf-8"))
+                    if res2.get("status"):
+                        download_url = res2.get("data", {}).get("dl")
+            except Exception:
+                pass
+
+        if download_url:
+            return JSONResponse(content={
+                "success": True,
+                "url": download_url,
+                "download_url": download_url
+            })
+        else:
+            return JSONResponse(status_code=400, content={"error": True, "message": "Failed! Server APIs change ho gaye hain."})
 
     except Exception as e:
-        print(f"==> 🚨 CRITICAL ERROR: {str(e)}")
-        return JSONResponse(status_code=500, content={"error": True, "success": False, "message": str(e)})
+        return JSONResponse(status_code=500, content={"error": True, "message": str(e)})
         
