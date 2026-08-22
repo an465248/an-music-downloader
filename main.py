@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 import urllib.request
+import urllib.parse
 import json
 import os
-import re
 
 app = FastAPI(title="AnMusic Downloader")
 
@@ -30,11 +30,6 @@ async def get_info(request: Request):
         ]
     })
 
-# YouTube Video ID निकालने का फंक्शन
-def get_yt_id(url):
-    m = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\?|&|/|$)", url)
-    return m.group(1) if m else None
-
 @app.api_route("/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/api/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "OPTIONS"])
@@ -45,70 +40,78 @@ async def handle_download(request: Request, full_path: str = ""):
         url = None
         format_type = "video"
         
-        body = await request.body()
-        if body:
-            try:
+        # 1. JSON Data Check
+        try:
+            body = await request.body()
+            if body:
                 data = json.loads(body)
                 url = data.get("url") or data.get("link")
                 format_type = data.get("format_type", "video")
+        except: pass
+        
+        # 2. Form Data Check (यही वो लाइन है जो मैंने हटा दी थी!)
+        if not url:
+            try:
+                form_data = await request.form()
+                url = form_data.get("url") or form_data.get("link")
+                if form_data.get("format_type"):
+                    format_type = form_data.get("format_type")
             except: pass
         
+        # 3. Query Params Check
         if not url:
             url = request.query_params.get("url") or request.query_params.get("link")
 
+        # अगर यहाँ तक भी लिंक नहीं मिला, तब 400 एरर आएगा 
         if not url:
-            return JSONResponse(status_code=400, content={"error": True, "message": "Link nahi mila"})
+            return JSONResponse(status_code=400, content={"error": True, "message": "Link parse nahi hua."})
 
         download_url = None
         domain = url.lower()
-        
-        # === 1. YOUTUBE BYPASS (Invidious Network - कभी ब्लॉक नहीं होगा) ===
-        if "youtube.com" in domain or "youtu.be" in domain:
-            vid = get_yt_id(url)
-            if vid:
-                # ये 4 अलग-अलग देशों के सर्वर्स हैं
-                instances = [
-                    "https://vid.puffyan.us",
-                    "https://invidious.nerdvpn.de",
-                    "https://inv.tux.pizza",
-                    "https://invidious.jing.rocks"
-                ]
-                for inst in instances:
-                    try:
-                        api = f"{inst}/api/v1/videos/{vid}"
-                        req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req, timeout=8) as res:
-                            data = json.loads(res.read().decode("utf-8"))
-                            
-                            if format_type == 'audio':
-                                for f in data.get("adaptiveFormats", []):
-                                    if "audio" in f.get("type", ""):
-                                        download_url = f.get("url")
-                                        break
-                            else:
-                                for f in data.get("formatStreams", []):
-                                    if f.get("url"):
-                                        download_url = f.get("url")
-                                        break
-                            
-                            if download_url: break # लिंक मिल गया तो बाहर आ जाओ
-                    except: continue # अगर एक देश का सर्वर बंद है, तो दूसरे पर जाओ
+        encoded_url = urllib.parse.quote(url)
 
-        # === 2. INSTAGRAM / OTHERS (Cobalt Backup) ===
+        # === APIs for Instagram & YouTube ===
+        if "instagram.com" in domain:
+            api_list = [
+                f"https://api.siputzx.my.id/api/d/ig?url={encoded_url}",
+                f"https://api.ryzendesu.vip/api/downloader/igdl?url={encoded_url}"
+            ]
+        else:
+            t_type = "ytmp3" if format_type == 'audio' else "ytmp4"
+            api_list = [
+                f"https://api.siputzx.my.id/api/d/{t_type}?url={encoded_url}",
+                f"https://api.ryzendesu.vip/api/downloader/{t_type}?url={encoded_url}"
+            ]
+
+        for api in api_list:
+            try:
+                req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    res = json.loads(response.read().decode("utf-8"))
+                    
+                    if "instagram" in domain:
+                        if res.get("data") and isinstance(res["data"], list) and len(res["data"]) > 0:
+                            download_url = res["data"][0].get("url")
+                        elif res.get("data") and isinstance(res["data"], dict):
+                            download_url = res["data"].get("url")
+                    else:
+                        download_url = res.get("data", {}).get("dl") or res.get("data", {}).get("url") or res.get("url")
+                    
+                    if download_url: break
+            except: continue
+
+        # Universal Fallback (Cobalt)
         if not download_url:
             try:
+                cobalt_url = "https://api.cobalt.tools/api/json"
                 payload = json.dumps({"url": url, "isAudioOnly": True if format_type == 'audio' else False}).encode("utf-8")
-                req = urllib.request.Request(
-                    "https://api.cobalt.tools/api/json", 
-                    data=payload, 
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                        "Origin": "https://cobalt.tools",
-                        "User-Agent": "Mozilla/5.0"
-                    }, 
-                    method="POST"
-                )
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Origin": "https://cobalt.tools",
+                    "User-Agent": "Mozilla/5.0"
+                }
+                req = urllib.request.Request(cobalt_url, data=payload, headers=headers, method="POST")
                 with urllib.request.urlopen(req, timeout=10) as response:
                     res = json.loads(response.read().decode("utf-8"))
                     download_url = res.get("url") or (res.get("picker")[0].get("url") if res.get("picker") else None)
@@ -117,8 +120,8 @@ async def handle_download(request: Request, full_path: str = ""):
         if download_url:
             return JSONResponse(content={"success": True, "url": download_url, "download_url": download_url})
         else:
-            return JSONResponse(status_code=400, content={"error": True, "message": "सारे सर्वर्स ने ब्लॉक कर दिया है।"})
+            return JSONResponse(status_code=400, content={"error": True, "message": "API Servers down hain."})
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": True, "message": str(e)})
-        
+                                                      
