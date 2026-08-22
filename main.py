@@ -15,16 +15,18 @@ async def home():
             return f.read()
     return "<h3>index.html not found in templates folder!</h3>"
 
-# Yeh route /download aur / dono par kaam karega taaki Not Found na aaye
-@app.api_route("/download", methods=["GET", "POST"])
+# Yeh sabhi possible paths ko ek saath pakad lega taaki Not Found na aaye
+@app.api_route("/download", methods=["GET", "POST", "PUT", "DELETE"])
+@app.api_route("/api/download", methods=["GET", "POST", "PUT", "DELETE"])
+@app.api_route("/submit", methods=["GET", "POST", "PUT", "DELETE"])
 @app.api_route("/", methods=["POST"])
-async def download_file(request: Request):
+async def catch_all_downloads(request: Request):
     url = None
     format_type = "video"
     
     try:
         form_data = await request.form()
-        url = form_data.get("url")
+        url = form_data.get("url") or form_data.get("link") or form_data.get("input")
         format_type = form_data.get("format_type", "video")
     except:
         pass
@@ -32,13 +34,13 @@ async def download_file(request: Request):
     if not url:
         try:
             json_data = await request.json()
-            url = json_data.get("url")
+            url = json_data.get("url") or json_data.get("link")
             format_type = json_data.get("format_type", "video")
         except:
             pass
 
     if not url:
-        url = request.query_params.get("url")
+        url = request.query_params.get("url") or request.query_params.get("link")
 
     if not url:
         return HTMLResponse(content="<h3>Kripya YouTube link dalein! <a href='/'>Wapas Jayein</a></h3>")
