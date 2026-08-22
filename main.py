@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 import yt_dlp
 import os
 
@@ -15,12 +15,13 @@ async def home():
             return f.read()
     return "<h3>index.html not found in templates folder!</h3>"
 
+# Yeh route /download aur / dono par kaam karega taaki Not Found na aaye
 @app.api_route("/download", methods=["GET", "POST"])
+@app.api_route("/", methods=["POST"])
 async def download_file(request: Request):
     url = None
     format_type = "video"
     
-    # 1. Check karein agar data Form se aaya hai
     try:
         form_data = await request.form()
         url = form_data.get("url")
@@ -28,7 +29,6 @@ async def download_file(request: Request):
     except:
         pass
 
-    # 2. Agar Form mein nahi mila, toh check karein agar JSON (JavaScript) se aaya hai
     if not url:
         try:
             json_data = await request.json()
@@ -37,13 +37,11 @@ async def download_file(request: Request):
         except:
             pass
 
-    # 3. Agar Query Parameters (?url=...) se aaya hai
     if not url:
         url = request.query_params.get("url")
-        format_type = request.query_params.get("format_type", "video")
 
     if not url:
-        return HTMLResponse(content="<h3>Error: YouTube Link nahi mila! <a href='/'>Wapas Jayein</a></h3>")
+        return HTMLResponse(content="<h3>Kripya YouTube link dalein! <a href='/'>Wapas Jayein</a></h3>")
 
     ydl_opts = {
         'format': 'bestaudio/best' if format_type == 'audio' else 'best',
@@ -58,7 +56,7 @@ async def download_file(request: Request):
             if download_url:
                 return RedirectResponse(url=download_url, status_code=303)
             else:
-                return HTMLResponse(content="<h3>Download link nahi mila. Dusra video try karein!</h3><p><a href='/'>Go Back</a></p>")
+                return HTMLResponse(content="<h3>Link nahi mila. Dusra try karein!</h3><p><a href='/'>Go Back</a></p>")
                 
     except Exception as e:
         return HTMLResponse(content=f"<h3>Error: {str(e)}</h3><p><a href='/'>Go Back</a></p>")
