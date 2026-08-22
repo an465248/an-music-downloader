@@ -22,7 +22,7 @@ async def handle_download(request: Request, full_path: str = ""):
     url = None
     format_type = "video"
 
-    # 1. JSON body check
+    # 1. JSON Request Check
     try:
         json_data = await request.json()
         if isinstance(json_data, dict):
@@ -31,7 +31,7 @@ async def handle_download(request: Request, full_path: str = ""):
     except Exception:
         pass
 
-    # 2. Form body check
+    # 2. Form Data Check
     if not url:
         try:
             form_data = await request.form()
@@ -40,26 +40,28 @@ async def handle_download(request: Request, full_path: str = ""):
         except Exception:
             pass
 
-    # 3. Query Parameter check
+    # 3. Query Param Check
     if not url:
         url = request.query_params.get("url") or request.query_params.get("link")
 
     if not url:
-        return JSONResponse(status_code=400, content={"status": "error", "message": "URL missing"})
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Link nahi mila"})
 
-    # yt-dlp configuration with client bypass
+    # Render IP block bypass settings
     ydl_opts = {
-        'format': 'bestaudio/best' if format_type == 'audio' else 'best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best' if format_type == 'video' else 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'no_warnings': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web']
+                'player_client': ['ios', 'android_creator', 'web'],
+                'player_skip': ['webpage', 'configs']
             }
         },
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
     }
 
@@ -67,17 +69,18 @@ async def handle_download(request: Request, full_path: str = ""):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # Direct media URL nikalna
-            download_url = info.get('url')
-            
-            # Agar direct url na mile toh formats me se best URL uthana
-            if not download_url and 'formats' in info:
+            # Formats list se valid direct URL nikalna
+            download_url = None
+            if 'formats' in info:
                 for f in reversed(info['formats']):
-                    if f.get('url'):
-                        download_url = f['url']
+                    if f.get('url') and f.get('acodec') != 'none':
+                        download_url = f.get('url')
                         break
+            
+            if not download_url:
+                download_url = info.get('url')
 
-            title = info.get('title', 'media_file')
+            title = info.get('title', 'Video')
 
             if download_url:
                 return JSONResponse(content={
@@ -85,10 +88,11 @@ async def handle_download(request: Request, full_path: str = ""):
                     "success": True,
                     "url": download_url,
                     "download_url": download_url,
+                    "link": download_url,
                     "title": title
                 })
             else:
-                return JSONResponse(status_code=400, content={"status": "error", "message": "Direct link not found"})
+                return JSONResponse(status_code=400, content={"status": "error", "message": "Link generate nahi ho saka"})
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return JSONResponse(status_code=500, content={"status": "error", "message": f"Server Error: {str(e)}"})
