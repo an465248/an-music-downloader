@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 import urllib.request
-import urllib.error
 import json
 import os
+import re
 
 app = FastAPI(title="AnMusic Downloader")
 
@@ -17,7 +17,13 @@ async def home():
             return f.read()
     return "<h3>index.html not found!</h3>"
 
-# 1. INFO API (यह 200 OK दे रहा है, एकदम सही है)
+# YouTube Video ID निकालने का फंक्शन
+def extract_video_id(url):
+    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\?|&|/|$)", url)
+    if match:
+        return match.group(1)
+    return None
+
 @app.api_route("/api/info", methods=["GET", "POST", "OPTIONS"])
 async def get_info(request: Request):
     if request.method == "OPTIONS":
@@ -37,7 +43,6 @@ async def get_info(request: Request):
         ]
     })
 
-# 2. DOWNLOAD API (Headers और Backup सर्वर के साथ)
 @app.api_route("/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/api/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "OPTIONS"])
@@ -64,74 +69,49 @@ async def handle_download(request: Request, full_path: str = ""):
         if not url:
             return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Link nahi mila"})
 
-        # Primary Server
-        api_url = "https://co.wuk.sh/api/json"
-        
-        payload = {
-            "url": url,
-            "isAudioOnly": True if format_type == 'audio' else False,
-            "aFormat": "mp3"
-        }
-        
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Origin": "https://co.wuk.sh",
-            "Referer": "https://co.wuk.sh/"
-        }
-        
-        req = urllib.request.Request(
-            api_url, 
-            data=json.dumps(payload).encode("utf-8"), 
-            headers=headers, 
-            method="POST"
-        )
-        
-        try:
-            with urllib.request.urlopen(req) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                download_url = result.get("url")
-                
-                if not download_url and result.get("picker"):
-                    download_url = result["picker"][0].get("url")
+        video_id = extract_video_id(url)
+        if not video_id:
+            return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "YouTube Video ID nahi mila"})
 
-                if download_url:
-                    return JSONResponse(content={
-                        "success": True,
-                        "url": download_url,
-                        "download_url": download_url,
-                        "title": "AnMusic Download"
-                    })
-                else:
-                    return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Link nahi nikal paya"})
+        # === PIPED API MULTI-SERVER BYPASS (ब्लॉक नहीं होगा) ===
+        instances = [
+            "https://pipedapi.kavin.rocks", 
+            "https://pipedapi.tokhmi.xyz", 
+            "https://api.piped.projectsegfau.lt"
+        ]
         
-        except urllib.error.HTTPError as he:
-            # Agar Primary Server fail ho, to Backup Server (Cobalt) try karega
+        download_url = None
+        
+        for instance in instances:
             try:
-                fallback_url = "https://api.cobalt.tools/api/json"
-                fallback_headers = {
-                    "Accept": "application/json", 
-                    "Content-Type": "application/json", 
-                    "Origin": "https://cobalt.tools", 
-                    "Referer": "https://cobalt.tools/"
-                }
-                req_fallback = urllib.request.Request(
-                    fallback_url, 
-                    data=json.dumps(payload).encode("utf-8"), 
-                    headers=fallback_headers, 
-                    method="POST"
+                api_url = f"{instance}/streams/{video_id}"
+                req = urllib.request.Request(
+                    api_url, 
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
                 )
-                with urllib.request.urlopen(req_fallback) as response2:
-                    res2 = json.loads(response2.read().decode("utf-8"))
-                    d_url = res2.get("url") or (res2.get("picker")[0].get("url") if res2.get("picker") else None)
-                    if d_url:
-                         return JSONResponse(content={"success": True, "url": d_url, "download_url": d_url, "title": "AnMusic Download"})
+                with urllib.request.urlopen(req, timeout=8) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    
+                    if format_type == 'audio' and result.get("audioStreams"):
+                        download_url = result["audioStreams"][-1].get("url") 
+                    elif result.get("videoStreams"):
+                        download_url = result["videoStreams"][0].get("url")
+                    
+                    if download_url:
+                        break # लिंक मिल गया, लूप से बाहर आओ!
             except Exception:
-                return JSONResponse(status_code=500, content={"error": True, "success": False, "message": "Dono API fail ho gaye."})
+                continue # अगर यह सर्वर डाउन है, तो अगला ट्राई करो
 
-            return JSONResponse(status_code=500, content={"error": True, "success": False, "message": "API Error."})
+        if download_url:
+            return JSONResponse(content={
+                "success": True,
+                "url": download_url,
+                "download_url": download_url,
+                "title": "AnMusic Download"
+            })
+        else:
+            return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Sare servers busy hain, thodi der baad try karein"})
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": True, "success": False, "message": f"Server Error: {str(e)}"})
-            
+        
