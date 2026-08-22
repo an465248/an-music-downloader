@@ -1,21 +1,17 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+import os
 
-app = FastAPI()
+app = FastAPI(title="AnMusic Downloader")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# static और templates फोल्डर का सही पाथ
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 @app.get("/", response_class=HTMLResponse)
-async def home():
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>AnMusic Downloader</title>
-    </head>
-    <body style="font-family: Arial; text-align: center; margin-top: 50px;">
-        <h1>AnMusic Downloader is Live!</h1>
-        <p>App successfully running on Render.</p>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+async def home(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
