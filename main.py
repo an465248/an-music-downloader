@@ -3,7 +3,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import urllib.request
 import json
 import os
-import re
 
 app = FastAPI(title="AnMusic Downloader")
 
@@ -17,28 +16,15 @@ async def home():
             return f.read()
     return "<h3>index.html not found!</h3>"
 
-# YouTube Video ID निकालने का फंक्शन
-def extract_video_id(url):
-    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\?|&|/|$)", url)
-    if match:
-        return match.group(1)
-    return None
-
 @app.api_route("/api/info", methods=["GET", "POST", "OPTIONS"])
 async def get_info(request: Request):
-    if request.method == "OPTIONS":
-        return JSONResponse(content={"status": "ok"})
-        
-    url = request.query_params.get("url") or request.query_params.get("link")
-    if not url:
-        return JSONResponse(status_code=400, content={"error": "URL missing"})
-
+    if request.method == "OPTIONS": return JSONResponse(content={"status": "ok"})
     return JSONResponse(content={
         "id": "video",
-        "title": "Ready to Download",
+        "title": "AnMusic Download Ready",
         "thumbnail": "https://www.youtube.com/img/desktop/yt_1200.png",
         "formats": [
-            {"format_id": "mp4", "ext": "mp4", "format_note": "Video (HD)"},
+            {"format_id": "mp4", "ext": "mp4", "format_note": "Video"},
             {"format_id": "mp3", "ext": "mp3", "format_note": "Audio"}
         ]
     })
@@ -47,71 +33,63 @@ async def get_info(request: Request):
 @app.api_route("/api/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/{full_path:path}", methods=["GET", "POST", "OPTIONS"])
 async def handle_download(request: Request, full_path: str = ""):
-    if request.method == "OPTIONS":
-        return JSONResponse(content={"status": "ok"})
-
-    url = None
-    format_type = "video"
-
+    if request.method == "OPTIONS": return JSONResponse(content={"status": "ok"})
+    
     try:
+        url = None
+        format_type = "video"
+        
         body = await request.body()
         if body:
-            try:
-                data = json.loads(body)
-                url = data.get("url") or data.get("link")
-                format_type = data.get("format_type", "video")
-            except Exception:
-                pass
+            data = json.loads(body)
+            url = data.get("url") or data.get("link")
+            format_type = data.get("format_type", "video")
         
         if not url:
             url = request.query_params.get("url") or request.query_params.get("link")
 
-        if not url:
-            return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Link nahi mila"})
+        # === X-RAY LOGS START ===
+        print(f"==> DOWNLOADING: {url} | FORMAT: {format_type}")
 
-        video_id = extract_video_id(url)
-        if not video_id:
-            return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "YouTube Video ID nahi mila"})
-
-        # === PIPED API MULTI-SERVER BYPASS (ब्लॉक नहीं होगा) ===
-        instances = [
-            "https://pipedapi.kavin.rocks", 
-            "https://pipedapi.tokhmi.xyz", 
-            "https://api.piped.projectsegfau.lt"
+        cobalt_instances = [
+            "https://co.wuk.sh/api/json",
+            "https://api.cobalt.tools/api/json",
+            "https://cobalt.owo.vc/api/json"
         ]
         
-        download_url = None
+        payload = json.dumps({
+            "url": url,
+            "isAudioOnly": True if format_type == 'audio' else False
+        }).encode("utf-8")
         
-        for instance in instances:
+        for instance in cobalt_instances:
+            print(f"==> TRYING SERVER: {instance}")
             try:
-                api_url = f"{instance}/streams/{video_id}"
                 req = urllib.request.Request(
-                    api_url, 
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                    instance,
+                    data=payload,
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                    },
+                    method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=8) as response:
-                    result = json.loads(response.read().decode("utf-8"))
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    res = json.loads(response.read().decode("utf-8"))
+                    d_url = res.get("url") or (res.get("picker")[0].get("url") if res.get("picker") else None)
                     
-                    if format_type == 'audio' and result.get("audioStreams"):
-                        download_url = result["audioStreams"][-1].get("url") 
-                    elif result.get("videoStreams"):
-                        download_url = result["videoStreams"][0].get("url")
-                    
-                    if download_url:
-                        break # लिंक मिल गया, लूप से बाहर आओ!
-            except Exception:
-                continue # अगर यह सर्वर डाउन है, तो अगला ट्राई करो
-
-        if download_url:
-            return JSONResponse(content={
-                "success": True,
-                "url": download_url,
-                "download_url": download_url,
-                "title": "AnMusic Download"
-            })
-        else:
-            return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Sare servers busy hain, thodi der baad try karein"})
+                    if d_url:
+                        print(f"==> SUCCESS WITH {instance} 🎉")
+                        return JSONResponse(content={"success": True, "url": d_url, "download_url": d_url})
+            except Exception as ex:
+                print(f"==> SERVER FAILED ({instance}): {str(ex)}")
+                continue
+        
+        print("==> 🚨 ALL SERVERS BLOCKED RENDER IP!")
+        return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "All servers blocked."})
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": True, "success": False, "message": f"Server Error: {str(e)}"})
+        print(f"==> 🚨 CRITICAL ERROR: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": True, "success": False, "message": str(e)})
         
