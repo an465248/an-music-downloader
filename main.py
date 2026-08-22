@@ -15,50 +15,51 @@ async def home():
             return f.read()
     return "<h3>index.html not found in templates folder!</h3>"
 
-# Yeh sabhi possible paths ko ek saath pakad lega taaki Not Found na aaye
-@app.api_route("/download", methods=["GET", "POST", "PUT", "DELETE"])
-@app.api_route("/api/download", methods=["GET", "POST", "PUT", "DELETE"])
-@app.api_route("/submit", methods=["GET", "POST", "PUT", "DELETE"])
-@app.api_route("/", methods=["POST"])
-async def catch_all_downloads(request: Request):
+# Kisi bhi URL / path par aane wali request ko yeh handle karega
+@app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def catch_all(request: Request, full_path: str):
     url = None
     format_type = "video"
-    
+
+    # 1. Form data check
     try:
         form_data = await request.form()
-        url = form_data.get("url") or form_data.get("link") or form_data.get("input")
+        url = form_data.get("url") or form_data.get("link") or form_data.get("video_url") or form_data.get("query")
         format_type = form_data.get("format_type", "video")
     except:
         pass
 
+    # 2. JSON data check
     if not url:
         try:
             json_data = await request.json()
-            url = json_data.get("url") or json_data.get("link")
+            url = json_data.get("url") or json_data.get("link") or json_data.get("video_url") or json_data.get("query")
             format_type = json_data.get("format_type", "video")
         except:
             pass
 
+    # 3. URL Query Parameter check
     if not url:
-        url = request.query_params.get("url") or request.query_params.get("link")
+        url = request.query_params.get("url") or request.query_params.get("link") or request.query_params.get("q")
 
+    # Agar link nahi mila, toh home page wapas bhej do
     if not url:
-        return HTMLResponse(content="<h3>Kripya YouTube link dalein! <a href='/'>Wapas Jayein</a></h3>")
+        return RedirectResponse(url="/", status_code=303)
 
     ydl_opts = {
         'format': 'bestaudio/best' if format_type == 'audio' else 'best',
         'noplaylist': True,
     }
-    
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             download_url = info.get('url')
-            
+
             if download_url:
                 return RedirectResponse(url=download_url, status_code=303)
             else:
-                return HTMLResponse(content="<h3>Link nahi mila. Dusra try karein!</h3><p><a href='/'>Go Back</a></p>")
-                
+                return HTMLResponse(content="<h3>Direct link nahi mila. Dusra video try karein!</h3><p><a href='/'>Go Back</a></p>")
+
     except Exception as e:
         return HTMLResponse(content=f"<h3>Error: {str(e)}</h3><p><a href='/'>Go Back</a></p>")
