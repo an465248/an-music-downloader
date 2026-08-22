@@ -11,6 +11,7 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
+    html_content = """
  <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -514,3 +515,21 @@ async def home():
     </script>
 </body>
 </html>
+"""
+    return HTMLResponse(content=html_content)
+
+@app.post("/download")
+async def download_file(url: str = Form(...), format_type: str = Form("video")):
+    ydl_opts = {
+        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
+    }
+    if format_type == 'audio':
+        ydl_opts['format'] = 'bestaudio/best'
+    else:
+        ydl_opts['format'] = 'best'
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+    
+    return FileResponse(filename, filename=os.path.basename(filename), media_type='application/octet-stream')
