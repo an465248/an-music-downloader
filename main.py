@@ -47,18 +47,20 @@ async def handle_download(request: Request, full_path: str = ""):
     if not url:
         return JSONResponse(status_code=400, content={"status": "error", "message": "Link nahi mila"})
 
-    # Render IP block bypass settings
-    ydl_opts = {
-        'format': 'best[ext=mp4]/best' if format_type == 'video' else 'bestaudio/best',
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android_creator', 'web'],
-                'player_skip': ['webpage', 'configs']
-            }
-        },
+  # Render IP block bypass settings
+ydl_opts = {
+    'format': 'best[ext=mp4]/best' if format_type == 'video' else 'bestaudio/best',
+    'noplaylist': True,
+    'quiet': True,
+    'no_warnings': True,
+    'cookiefile': os.path.join(BASE_DIR, 'cookies.txt'),
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['ios', 'android_creator', 'web'],
+            'player_skip': ['webpage', 'configs']
+        }
+    }
+}
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1',
             'Accept-Language': 'en-US,en;q=0.9',
