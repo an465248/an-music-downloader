@@ -1,9 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 import urllib.request
-import urllib.parse
 import json
 import os
+import re
 
 app = FastAPI(title="AnMusic Downloader")
 
@@ -29,6 +29,11 @@ async def get_info(request: Request):
             {"format_id": "mp3", "ext": "mp3", "format_note": "Audio"}
         ]
     })
+
+# YouTube Video ID निकालने का फंक्शन
+def get_yt_id(url):
+    m = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\?|&|/|$)", url)
+    return m.group(1) if m else None
 
 @app.api_route("/download", methods=["GET", "POST", "OPTIONS"])
 @app.api_route("/api/download", methods=["GET", "POST", "OPTIONS"])
@@ -56,64 +61,64 @@ async def handle_download(request: Request, full_path: str = ""):
 
         download_url = None
         domain = url.lower()
-        encoded_url = urllib.parse.quote(url)
+        
+        # === 1. YOUTUBE BYPASS (Invidious Network - कभी ब्लॉक नहीं होगा) ===
+        if "youtube.com" in domain or "youtu.be" in domain:
+            vid = get_yt_id(url)
+            if vid:
+                # ये 4 अलग-अलग देशों के सर्वर्स हैं
+                instances = [
+                    "https://vid.puffyan.us",
+                    "https://invidious.nerdvpn.de",
+                    "https://inv.tux.pizza",
+                    "https://invidious.jing.rocks"
+                ]
+                for inst in instances:
+                    try:
+                        api = f"{inst}/api/v1/videos/{vid}"
+                        req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=8) as res:
+                            data = json.loads(res.read().decode("utf-8"))
+                            
+                            if format_type == 'audio':
+                                for f in data.get("adaptiveFormats", []):
+                                    if "audio" in f.get("type", ""):
+                                        download_url = f.get("url")
+                                        break
+                            else:
+                                for f in data.get("formatStreams", []):
+                                    if f.get("url"):
+                                        download_url = f.get("url")
+                                        break
+                            
+                            if download_url: break # लिंक मिल गया तो बाहर आ जाओ
+                    except: continue # अगर एक देश का सर्वर बंद है, तो दूसरे पर जाओ
 
-        # 1. Instagram ke liye Smart APIs
-        if "instagram.com" in domain:
-            api_list = [
-                f"https://api.siputzx.my.id/api/d/ig?url={encoded_url}",
-                f"https://api.ryzendesu.vip/api/downloader/igdl?url={encoded_url}"
-            ]
-            for api in api_list:
-                try:
-                    req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=10) as response:
-                        res = json.loads(response.read().decode("utf-8"))
-                        if res.get("data") and isinstance(res["data"], list) and len(res["data"]) > 0:
-                            download_url = res["data"][0].get("url")
-                        elif res.get("data") and isinstance(res["data"], dict):
-                            download_url = res["data"].get("url")
-                        if download_url: break
-                except: continue
-
-        # 2. YouTube ke liye Smart APIs
-        elif "youtube.com" in domain or "youtu.be" in domain:
-            t_type = "ytmp3" if format_type == 'audio' else "ytmp4"
-            api_list = [
-                f"https://api.siputzx.my.id/api/d/{t_type}?url={encoded_url}",
-                f"https://api.ryzendesu.vip/api/downloader/{t_type}?url={encoded_url}"
-            ]
-            for api in api_list:
-                try:
-                    req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=10) as response:
-                        res = json.loads(response.read().decode("utf-8"))
-                        download_url = res.get("data", {}).get("dl") or res.get("data", {}).get("url") or res.get("url")
-                        if download_url: break
-                except: continue
-
-        # 3. Cobalt API (Facebook, Twitter aur baaki sabhi sites ke liye Universal Backup)
+        # === 2. INSTAGRAM / OTHERS (Cobalt Backup) ===
         if not download_url:
             try:
-                cobalt_url = "https://api.cobalt.tools/api/json"
                 payload = json.dumps({"url": url, "isAudioOnly": True if format_type == 'audio' else False}).encode("utf-8")
-                headers = {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Origin": "https://cobalt.tools",
-                    "User-Agent": "Mozilla/5.0"
-                }
-                req = urllib.request.Request(cobalt_url, data=payload, headers=headers, method="POST")
+                req = urllib.request.Request(
+                    "https://api.cobalt.tools/api/json", 
+                    data=payload, 
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "Origin": "https://cobalt.tools",
+                        "User-Agent": "Mozilla/5.0"
+                    }, 
+                    method="POST"
+                )
                 with urllib.request.urlopen(req, timeout=10) as response:
                     res = json.loads(response.read().decode("utf-8"))
                     download_url = res.get("url") or (res.get("picker")[0].get("url") if res.get("picker") else None)
             except: pass
 
-        # Final Result Return Karna
         if download_url:
             return JSONResponse(content={"success": True, "url": download_url, "download_url": download_url})
         else:
-            return JSONResponse(status_code=400, content={"error": True, "message": "Link process nahi ho paya. Server busy hai."})
+            return JSONResponse(status_code=400, content={"error": True, "message": "सारे सर्वर्स ने ब्लॉक कर दिया है।"})
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": True, "message": str(e)})
+        
