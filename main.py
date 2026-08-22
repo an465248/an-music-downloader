@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-import yt_dlp
-import os
+import urllib.request
 import json
+import os
 
 app = FastAPI(title="AnMusic Downloader")
 
@@ -28,7 +28,6 @@ async def handle_download(request: Request, full_path: str = ""):
 
     try:
         body = await request.body()
-        
         if body:
             try:
                 data = json.loads(body)
@@ -48,40 +47,46 @@ async def handle_download(request: Request, full_path: str = ""):
         if not url:
             return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Link nahi mila"})
 
-        ydl_opts = {
-            'format': 'bestaudio/best' if format_type == 'audio' else 'best',
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': os.path.join(BASE_DIR, 'cookies.txt'),
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'web']
-                }
-            }
+        # === Third-Party API Bypass (No yt-dlp blocked IPs) ===
+        api_url = "https://api.cobalt.tools/api/json"
+        
+        payload = {
+            "url": url,
+            "isAudioOnly": True if format_type == 'audio' else False,
+            "vQuality": "720"
         }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            download_url = info.get('url')
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+        
+        req = urllib.request.Request(
+            api_url, 
+            data=json.dumps(payload).encode("utf-8"), 
+            headers=headers, 
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req) as response:
+            result = json.loads(response.read().decode("utf-8"))
             
-            if not download_url and 'formats' in info:
-                for f in reversed(info['formats']):
-                    if f.get('url'):
-                        download_url = f['url']
-                        break
+            if result.get("status") in ["stream", "redirect", "success", "picker"]:
+                download_url = result.get("url")
+                
+                # Agar audio track list milti hai
+                if not download_url and result.get("picker"):
+                    download_url = result["picker"][0].get("url")
 
-            title = info.get('title', 'Video')
-
-            if download_url:
                 return JSONResponse(content={
                     "success": True,
                     "url": download_url,
                     "download_url": download_url,
-                    "title": title
+                    "title": "AnMusic Download"
                 })
             else:
-                return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "Direct link generate nahi ho saka"})
+                return JSONResponse(status_code=400, content={"error": True, "success": False, "message": "API link generate nahi kar paya"})
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": True, "success": False, "message": f"Server Error: {str(e)}"})
