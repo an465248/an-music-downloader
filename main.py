@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 import yt_dlp
 import os
 
@@ -17,11 +17,31 @@ async def home():
 
 @app.api_route("/download", methods=["GET", "POST"])
 async def download_file(request: Request):
-    # Yeh code apne aap check kar lega ki data form se aaya hai ya URL se
-    form_data = await request.form()
-    url = form_data.get("url")
-    format_type = form_data.get("format_type", "video")
+    url = None
+    format_type = "video"
     
+    # 1. Check karein agar data Form se aaya hai
+    try:
+        form_data = await request.form()
+        url = form_data.get("url")
+        format_type = form_data.get("format_type", "video")
+    except:
+        pass
+
+    # 2. Agar Form mein nahi mila, toh check karein agar JSON (JavaScript) se aaya hai
+    if not url:
+        try:
+            json_data = await request.json()
+            url = json_data.get("url")
+            format_type = json_data.get("format_type", "video")
+        except:
+            pass
+
+    # 3. Agar Query Parameters (?url=...) se aaya hai
+    if not url:
+        url = request.query_params.get("url")
+        format_type = request.query_params.get("format_type", "video")
+
     if not url:
         return HTMLResponse(content="<h3>Error: YouTube Link nahi mila! <a href='/'>Wapas Jayein</a></h3>")
 
